@@ -138,6 +138,10 @@ def render_selected_day(
 ) -> None:
 	days = sorted(dataframe["_dia"].unique())
 	selected_day = st.selectbox("Escolha o dia", days, format_func=str)
+	if selected_day is None:
+		st.info("Selecione um dia para visualizar os dados.")
+		return
+
 	selected = dataframe[dataframe["_dia"] == selected_day]
 	temperature_samples = selected.dropna(subset=[temperature_column])
 	humidity_samples = selected.dropna(subset=[humidity_column])
