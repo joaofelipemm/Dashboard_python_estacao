@@ -56,9 +56,14 @@ def find_column(dataframe: pd.DataFrame, names: tuple[str, ...]) -> str | None:
 	return None
 
 
-def prepare_temperature_data(dataframe: pd.DataFrame) -> tuple[pd.DataFrame, str, str]:
+def prepare_weather_data(
+	dataframe: pd.DataFrame,
+) -> tuple[pd.DataFrame, str, str, str]:
 	temperature_column = find_column(
 		dataframe, ("temperatura", "temperature", "temp")
+	)
+	humidity_column = find_column(
+		dataframe, ("umidade", "humidity", "humidade", "humid")
 	)
 	date_column = find_column(
 		dataframe,
@@ -67,6 +72,8 @@ def prepare_temperature_data(dataframe: pd.DataFrame) -> tuple[pd.DataFrame, str
 
 	if not temperature_column:
 		raise ValueError("Não encontrei uma coluna de temperatura na tabela.")
+	if not humidity_column:
+		raise ValueError("Não encontrei uma coluna de umidade na tabela.")
 	if not date_column:
 		raise ValueError("Não encontrei uma coluna de data ou horário na tabela.")
 
@@ -74,11 +81,16 @@ def prepare_temperature_data(dataframe: pd.DataFrame) -> tuple[pd.DataFrame, str
 	prepared[temperature_column] = pd.to_numeric(
 		prepared[temperature_column], errors="coerce"
 	)
+	prepared[humidity_column] = pd.to_numeric(
+		prepared[humidity_column], errors="coerce"
+	)
 	prepared["_momento"] = pd.to_datetime(prepared[date_column], errors="coerce")
-	prepared = prepared.dropna(subset=[temperature_column, "_momento"])
+	prepared = prepared.dropna(
+		subset=[temperature_column, humidity_column, "_momento"]
+	)
 	prepared["_dia"] = prepared["_momento"].dt.date
 	prepared = prepared.sort_values("_momento")
-	return prepared, temperature_column, date_column
+	return prepared, temperature_column, humidity_column, date_column
 
 
 def chart_layout(figure) -> None:
@@ -91,40 +103,54 @@ def chart_layout(figure) -> None:
 	st.plotly_chart(figure, width="stretch")
 
 
-def render_daily_summary(dataframe: pd.DataFrame, temperature_column: str) -> None:
-	daily = (
-		dataframe.groupby("_dia", as_index=False)[temperature_column]
-		.agg(maior="max", menor="min", media="mean")
+def render_daily_summary(
+	dataframe: pd.DataFrame, temperature_column: str, humidity_column: str
+) -> None:
+	temperature_summary = dataframe.groupby("_dia")[temperature_column].agg(
+		temperatura_maior="max",
+		temperatura_menor="min",
+		temperatura_media="mean",
 	)
-	daily_long = daily.melt(
-		id_vars="_dia", var_name="medida", value_name="temperatura"
+	humidity_summary = dataframe.groupby("_dia")[humidity_column].agg(
+		umidade_maior="max",
+		umidade_menor="min",
+		umidade_media="mean",
 	)
-	figure = px.line(
-		daily_long,
-		x="_dia",
-		y="temperatura",
-		color="medida",
-		markers=True,
-		title="Maior, menor e média por dia",
-		labels={"_dia": "Dia", "temperatura": "Temperatura", "medida": ""},
-	)
-	chart_layout(figure)
+	summary = temperature_summary.join(humidity_summary).reset_index()
+	summary["_dia"] = summary["_dia"].astype(str)
+	st.dataframe(summary, width="stretch", hide_index=True)
 
 
-def render_selected_day(dataframe: pd.DataFrame, temperature_column: str) -> None:
+def render_selected_day(
+	dataframe: pd.DataFrame, temperature_column: str, humidity_column: str
+) -> None:
 	days = sorted(dataframe["_dia"].unique())
 	selected_day = st.selectbox("Escolha o dia", days, format_func=str)
 	selected = dataframe[dataframe["_dia"] == selected_day]
+	start = pd.Timestamp(selected_day)
+	end = start + pd.Timedelta(hours=23, minutes=59, seconds=59)
 
-	figure = px.line(
+	temperature_figure = px.line(
 		selected,
 		x="_momento",
 		y=temperature_column,
 		markers=True,
-		title=f"Todas as leituras de {selected_day}",
+		title=f"Temperatura em {selected_day}",
 		labels={"_momento": "Horário", temperature_column: "Temperatura"},
 	)
-	chart_layout(figure)
+	temperature_figure.update_xaxes(range=[start, end], tickformat="%H:%M")
+	chart_layout(temperature_figure)
+
+	humidity_figure = px.line(
+		selected,
+		x="_momento",
+		y=humidity_column,
+		markers=True,
+		title=f"Umidade em {selected_day}",
+		labels={"_momento": "Horário", humidity_column: "Umidade"},
+	)
+	humidity_figure.update_xaxes(range=[start, end], tickformat="%H:%M")
+	chart_layout(humidity_figure)
 
 
 @st.fragment(run_every=REFRESH_INTERVAL)
@@ -140,7 +166,9 @@ def render_dashboard() -> None:
 		return
 
 	try:
-		prepared, temperature_column, _date_column = prepare_temperature_data(dataframe)
+		prepared, temperature_column, humidity_column, _date_column = (
+			prepare_weather_data(dataframe)
+		)
 	except ValueError as error:
 		st.error(str(error))
 		return
@@ -150,9 +178,9 @@ def render_dashboard() -> None:
 		return
 
 	st.subheader("Resumo diário")
-	render_daily_summary(prepared, temperature_column)
-	st.subheader("Leituras do dia")
-	render_selected_day(prepared, temperature_column)
+	render_daily_summary(prepared, temperature_column, humidity_column)
+	st.subheader("Leituras por horário")
+	render_selected_day(prepared, temperature_column, humidity_column)
 
 
 def render_sidebar() -> None:
