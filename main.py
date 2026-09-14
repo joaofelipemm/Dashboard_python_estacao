@@ -23,6 +23,7 @@ def get_setting(name: str, default: str | None = None) -> str | None:
 
 TABLE_NAME = get_setting("SUPABASE_TABLE", "leituras") or "leituras"
 ROW_LIMIT = int(get_setting("SUPABASE_ROW_LIMIT", "100") or "100")
+REFRESH_INTERVAL = "60s"
 
 
 @st.cache_resource
@@ -41,6 +42,23 @@ def create_supabase_client() -> Client:
 def query_table(client: Client, table: str, limit: int) -> list[dict]:
 	response = client.table(table).select("*").limit(limit).execute()
 	return response.data
+
+
+def load_data() -> pd.DataFrame:
+	rows = query_table(create_supabase_client(), TABLE_NAME, ROW_LIMIT)
+	return pd.DataFrame(rows)
+
+
+def render_metrics(dataframe: pd.DataFrame) -> None:
+	metric_columns = st.columns(3)
+	metric_columns[0].metric("Registros", len(dataframe))
+	metric_columns[1].metric("Tabela", TABLE_NAME)
+	metric_columns[2].metric("Atualizado", datetime.now().strftime("%H:%M:%S"))
+
+
+def render_table(dataframe: pd.DataFrame) -> None:
+	st.subheader("Tabela de dados")
+	st.dataframe(dataframe, width="stretch", hide_index=True)
 
 
 def render_chart(dataframe: pd.DataFrame) -> None:
@@ -67,6 +85,65 @@ def render_chart(dataframe: pd.DataFrame) -> None:
 	st.plotly_chart(figure, width="stretch")
 
 
+@st.fragment(run_every=REFRESH_INTERVAL)
+def render_dashboard() -> None:
+	try:
+		dataframe = load_data()
+	except Exception as error:
+		st.error(f"Não foi possível carregar os dados: {error}")
+		return
+
+	render_metrics(dataframe)
+
+	if dataframe.empty:
+		st.info("Nenhum registro encontrado.")
+		return
+
+	render_table(dataframe)
+	st.subheader("Visualização")
+	render_chart(dataframe)
+
+
+def render_sidebar() -> None:
+	with st.sidebar:
+		st.header("Configuração")
+		st.write(f"Tabela: `{TABLE_NAME}`")
+		st.write(f"Limite: `{ROW_LIMIT}` registros")
+		st.caption(f"Atualização automática: a cada {REFRESH_INTERVAL}")
+		if st.button("Atualizar agora", width="stretch"):
+			st.rerun()
+
+
+def configure_page() -> None:
+	st.set_page_config(
+		page_title="Dashboard de Leituras",
+		page_icon="📡",
+		layout="wide",
+	)
+
+	st.markdown(
+		"""
+		<style>
+			.stApp { background: #f4f1e8; }
+			h1, h2, h3 { color: #183b3b; }
+			[data-testid="stMetricValue"] { color: #183b3b; }
+			.block-container { padding-top: 3rem; }
+		</style>
+		""",
+		unsafe_allow_html=True,
+	)
+
+
+def main() -> None:
+	configure_page()
+	st.title("Leituras da estação")
+	st.caption("Dados atualizados diretamente da tabela no Supabase.")
+	render_sidebar()
+	render_dashboard()
+
+
+if __name__ == "__main__":
+	main()
 st.set_page_config(
 	page_title="Dashboard de Leituras",
 	page_icon="📡",
