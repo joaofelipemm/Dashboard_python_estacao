@@ -22,7 +22,7 @@ def get_setting(name: str, default: str | None = None) -> str | None:
 
 
 TABLE_NAME = get_setting("SUPABASE_TABLE", "leituras") or "leituras"
-ROW_LIMIT = int(get_setting("SUPABASE_ROW_LIMIT", "100") or "100")
+ROW_LIMIT = int(get_setting("SUPABASE_ROW_LIMIT", "2000") or "2000")
 REFRESH_INTERVAL = "60s"
 
 
