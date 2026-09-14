@@ -1,9 +1,10 @@
 import os
 
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 from dotenv import load_dotenv
+from plotly.subplots import make_subplots
 from supabase import Client, create_client
 
 load_dotenv()
@@ -130,27 +131,47 @@ def render_selected_day(
 	start = pd.Timestamp(selected_day)
 	end = start + pd.Timedelta(hours=23, minutes=59, seconds=59)
 
-	temperature_figure = px.line(
-		selected,
-		x="_momento",
-		y=temperature_column,
-		markers=True,
-		title=f"Temperatura em {selected_day}",
-		labels={"_momento": "Horário", temperature_column: "Temperatura"},
+	figure = make_subplots(
+		rows=2,
+		cols=1,
+		shared_xaxes=True,
+		vertical_spacing=0.12,
+		subplot_titles=("Temperatura", "Umidade"),
 	)
-	temperature_figure.update_xaxes(range=[start, end], tickformat="%H:%M")
-	chart_layout(temperature_figure)
-
-	humidity_figure = px.line(
-		selected,
-		x="_momento",
-		y=humidity_column,
-		markers=True,
-		title=f"Umidade em {selected_day}",
-		labels={"_momento": "Horário", humidity_column: "Umidade"},
+	figure.add_trace(
+		go.Scatter(
+			x=selected["_momento"],
+			y=selected[temperature_column],
+			mode="lines+markers",
+			name="Temperatura",
+			line={"color": "#e47b5c", "width": 2},
+		),
+		row=1,
+		col=1,
 	)
-	humidity_figure.update_xaxes(range=[start, end], tickformat="%H:%M")
-	chart_layout(humidity_figure)
+	figure.add_trace(
+		go.Scatter(
+			x=selected["_momento"],
+			y=selected[humidity_column],
+			mode="lines+markers",
+			name="Umidade",
+			line={"color": "#2d7d82", "width": 2},
+		),
+		row=2,
+		col=1,
+	)
+	figure.update_xaxes(range=[start, end], tickformat="%H:%M", title_text="Horário", row=2, col=1)
+	figure.update_yaxes(title_text="Temperatura", row=1, col=1)
+	figure.update_yaxes(title_text="Umidade", row=2, col=1)
+	figure.update_layout(
+		height=650,
+		title=f"Evolução dos dados em {selected_day}",
+		margin={"l": 20, "r": 20, "t": 90, "b": 20},
+		paper_bgcolor="rgba(0,0,0,0)",
+		plot_bgcolor="rgba(0,0,0,0)",
+		showlegend=False,
+	)
+	st.plotly_chart(figure, width="stretch")
 
 
 @st.fragment(run_every=REFRESH_INTERVAL)
