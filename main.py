@@ -1,4 +1,5 @@
 import os
+from typing import cast
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -41,7 +42,7 @@ def create_supabase_client() -> Client:
 
 def query_table(client: Client, table: str, limit: int) -> list[dict]:
 	response = client.table(table).select("*").limit(limit).execute()
-	return response.data
+	return cast(list[dict], response.data)
 
 
 def load_data() -> pd.DataFrame:
@@ -59,7 +60,7 @@ def find_column(dataframe: pd.DataFrame, names: tuple[str, ...]) -> str | None:
 
 def prepare_weather_data(
 	dataframe: pd.DataFrame,
-) -> tuple[pd.DataFrame, str, str, str]:
+) -> tuple[pd.DataFrame, str, str, str, str]:
 	temperature_column = find_column(
 		dataframe, ("temperatura", "temperature", "temp")
 	)
@@ -70,6 +71,7 @@ def prepare_weather_data(
 		dataframe,
 		("created at", "timestamp", "datetime", "data hora", "data", "date"),
 	)
+	hour_column = find_column(dataframe, ("hora", "hour", "time"))
 
 	if not temperature_column:
 		raise ValueError("Não encontrei uma coluna de temperatura na tabela.")
@@ -77,6 +79,8 @@ def prepare_weather_data(
 		raise ValueError("Não encontrei uma coluna de umidade na tabela.")
 	if not date_column:
 		raise ValueError("Não encontrei uma coluna de data ou horário na tabela.")
+	if not hour_column:
+		raise ValueError("Não encontrei uma coluna 'hora' na tabela.")
 
 	prepared = dataframe.copy()
 	prepared[temperature_column] = pd.to_numeric(
@@ -86,10 +90,16 @@ def prepare_weather_data(
 		prepared[humidity_column], errors="coerce"
 	)
 	prepared["_momento"] = pd.to_datetime(prepared[date_column], errors="coerce")
-	prepared = prepared.dropna(subset=[temperature_column, "_momento"])
 	prepared["_dia"] = prepared["_momento"].dt.date
+	prepared["_hora_grafico"] = pd.to_datetime(
+		prepared["_dia"].astype(str) + " " + prepared[hour_column].astype(str),
+		errors="coerce",
+	)
+	prepared = prepared.dropna(
+		subset=[temperature_column, "_momento", "_hora_grafico"]
+	)
 	prepared = prepared.sort_values("_momento")
-	return prepared, temperature_column, humidity_column, date_column
+	return prepared, temperature_column, humidity_column, date_column, hour_column
 
 
 def chart_layout(figure) -> None:
@@ -121,7 +131,10 @@ def render_daily_summary(
 
 
 def render_selected_day(
-	dataframe: pd.DataFrame, temperature_column: str, humidity_column: str
+	dataframe: pd.DataFrame,
+	temperature_column: str,
+	humidity_column: str,
+	hour_column: str,
 ) -> None:
 	days = sorted(dataframe["_dia"].unique())
 	selected_day = st.selectbox("Escolha o dia", days, format_func=str)
@@ -140,7 +153,7 @@ def render_selected_day(
 	)
 	figure.add_trace(
 		go.Scatter(
-			x=temperature_samples["_momento"],
+			x=temperature_samples["_hora_grafico"],
 			y=temperature_samples[temperature_column],
 			mode="lines+markers",
 			name="Temperatura",
@@ -151,7 +164,7 @@ def render_selected_day(
 	)
 	figure.add_trace(
 		go.Scatter(
-			x=humidity_samples["_momento"],
+			x=humidity_samples["_hora_grafico"],
 			y=humidity_samples[humidity_column],
 			mode="lines+markers",
 			name="Umidade",
@@ -160,7 +173,13 @@ def render_selected_day(
 		row=2,
 		col=1,
 	)
-	figure.update_xaxes(range=[start, end], tickformat="%H:%M", title_text="Horário", row=2, col=1)
+	figure.update_xaxes(
+		range=[start, end],
+		tickformat="%H:%M",
+		title_text=hour_column,
+		row=2,
+		col=1,
+	)
 	figure.update_yaxes(title_text="Temperatura", row=1, col=1)
 	figure.update_yaxes(title_text="Umidade", row=2, col=1)
 	figure.update_layout(
@@ -187,7 +206,7 @@ def render_dashboard() -> None:
 		return
 
 	try:
-		prepared, temperature_column, humidity_column, _date_column = (
+		prepared, temperature_column, humidity_column, _date_column, hour_column = (
 			prepare_weather_data(dataframe)
 		)
 	except ValueError as error:
@@ -201,7 +220,7 @@ def render_dashboard() -> None:
 	st.subheader("Resumo diário")
 	render_daily_summary(prepared, temperature_column, humidity_column)
 	st.subheader("Leituras por horário")
-	render_selected_day(prepared, temperature_column, humidity_column)
+	render_selected_day(prepared, temperature_column, humidity_column, hour_column)
 
 
 def render_sidebar() -> None:
