@@ -1,22 +1,38 @@
 import os
 from datetime import datetime
 
-from dash import Dash, Input, Output, dash_table, dcc, html
+import pandas as pd
+import plotly.express as px
+import streamlit as st
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
 load_dotenv()
 
 
-def create_supabase_client() -> Client:
-	load_dotenv()
+def get_setting(name: str, default: str | None = None) -> str | None:
+	value = os.getenv(name)
+	if value:
+		return value
 
-	url = os.getenv("SUPABASE_URL")
-	key = os.getenv("SUPABASE_KEY")
+	try:
+		return st.secrets.get(name, default)
+	except FileNotFoundError:
+		return default
+
+
+TABLE_NAME = get_setting("SUPABASE_TABLE", "leituras") or "leituras"
+ROW_LIMIT = int(get_setting("SUPABASE_ROW_LIMIT", "100") or "100")
+
+
+@st.cache_resource
+def create_supabase_client() -> Client:
+	url = get_setting("SUPABASE_URL")
+	key = get_setting("SUPABASE_KEY")
 
 	if not url or not key:
 		raise RuntimeError(
-			"Defina SUPABASE_URL e SUPABASE_KEY no arquivo .env ou no ambiente."
+			"Defina SUPABASE_URL e SUPABASE_KEY no arquivo .env ou nos Secrets."
 		)
 
 	return create_client(url, key)
@@ -27,116 +43,75 @@ def query_table(client: Client, table: str, limit: int) -> list[dict]:
 	return response.data
 
 
-TABLE_NAME = os.getenv("SUPABASE_TABLE", "leituras")
-ROW_LIMIT = int(os.getenv("SUPABASE_ROW_LIMIT", "100"))
+def render_chart(dataframe: pd.DataFrame) -> None:
+	numeric_columns = dataframe.select_dtypes(include="number").columns.tolist()
 
-app = Dash(__name__)
-app.title = "Dashboard de Leituras"
-server = app.server
+	if not numeric_columns:
+		return
 
-app.layout = html.Main(
-	[
-		html.Div(
-			[
-				html.P("SUPABASE / MONITORAMENTO", className="eyebrow"),
-				html.H1("Leituras da estação"),
-				html.P(
-					"Dados atualizados diretamente da sua tabela no Supabase.",
-					className="subtitle",
-				),
-			],
-			className="hero",
-		),
-		html.Section(
-			[
-				html.Div(
-					[
-						html.Div([html.Span("Tabela"), html.Strong(TABLE_NAME)]),
-						html.Div(
-							[html.Span("Registros"), html.Strong(id="row-count")]
-						),
-						html.Div(
-							[
-								html.Span("Última atualização"),
-								html.Strong(id="last-update"),
-							]
-						),
-					],
-					className="stats",
-				),
-				html.Div(id="error-message", className="error-message"),
-				dash_table.DataTable(
-					id="data-table",
-					data=[],
-					columns=[],
-					page_size=15,
-					sort_action="native",
-					filter_action="native",
-					style_table={"overflowX": "auto"},
-					style_cell={
-						"fontFamily": "IBM Plex Mono, monospace",
-						"fontSize": "13px",
-						"padding": "13px 16px",
-						"textAlign": "left",
-						"minWidth": "130px",
-						"maxWidth": "320px",
-						"overflow": "hidden",
-						"textOverflow": "ellipsis",
-					},
-					style_header={
-						"backgroundColor": "#183b3b",
-						"color": "#f4f1e8",
-						"fontWeight": "600",
-						"border": "none",
-					},
-					style_data={
-						"backgroundColor": "#fffdf8",
-						"color": "#24302f",
-						"border": "1px solid #e4e2d9",
-					},
-					style_data_conditional=[
-						{
-							"if": {"row_index": "odd"},
-							"backgroundColor": "#f7f5ee",
-						}
-					],
-				),
-				html.P(id="status-message", className="status-message"),
-			],
-			className="content",
-		),
-		dcc.Interval(id="refresh-interval", interval=60 * 1000, n_intervals=0),
-	]
+	value_column = st.selectbox("Coluna para visualizar", numeric_columns)
+	chart_data = dataframe[[value_column]].reset_index(names="registro")
+	figure = px.line(
+		chart_data,
+		x="registro",
+		y=value_column,
+		markers=True,
+		title=f"Evolução de {value_column}",
+	)
+	figure.update_layout(
+		height=360,
+		margin={"l": 20, "r": 20, "t": 60, "b": 20},
+		paper_bgcolor="rgba(0,0,0,0)",
+		plot_bgcolor="rgba(0,0,0,0)",
+	)
+	st.plotly_chart(figure, width="stretch")
+
+
+st.set_page_config(
+	page_title="Dashboard de Leituras",
+	page_icon="📡",
+	layout="wide",
 )
 
-
-@app.callback(
-	Output("data-table", "data"),
-	Output("data-table", "columns"),
-	Output("row-count", "children"),
-	Output("last-update", "children"),
-	Output("status-message", "children"),
-	Output("error-message", "children"),
-	Input("refresh-interval", "n_intervals"),
+st.markdown(
+	"""
+	<style>
+		.stApp { background: #f4f1e8; }
+		h1, h2, h3 { color: #183b3b; }
+		[data-testid="stMetricValue"] { color: #183b3b; }
+		.block-container { padding-top: 3rem; }
+	</style>
+	""",
+	unsafe_allow_html=True,
 )
-def update_table(_n_intervals: int):
-	try:
-		rows = query_table(create_supabase_client(), TABLE_NAME, ROW_LIMIT)
-		columns = [
-			{"name": column, "id": column}
-			for column in (rows[0].keys() if rows else [])
-		]
-		return (
-			rows,
-			columns,
-			str(len(rows)),
-			datetime.now().strftime("%H:%M:%S"),
-			f"{len(rows)} registro(s) carregado(s)",
-			"",
-		)
-	except Exception as error:
-		return [], [], "0", "--:--:--", "", f"Não foi possível carregar os dados: {error}"
 
+st.title("Leituras da estação")
+st.caption("Dados atualizados diretamente da tabela no Supabase.")
 
-if __name__ == "__main__":
-	app.run(debug=True)
+with st.sidebar:
+	st.header("Configuração")
+	st.write(f"Tabela: `{TABLE_NAME}`")
+	st.write(f"Limite: `{ROW_LIMIT}` registros")
+	if st.button("Atualizar dados", width="stretch"):
+		st.cache_resource.clear()
+		st.rerun()
+
+try:
+	rows = query_table(create_supabase_client(), TABLE_NAME, ROW_LIMIT)
+except Exception as error:
+	st.error(f"Não foi possível carregar os dados: {error}")
+	st.stop()
+
+dataframe = pd.DataFrame(rows)
+metric_columns = st.columns(3)
+metric_columns[0].metric("Registros", len(dataframe))
+metric_columns[1].metric("Tabela", TABLE_NAME)
+metric_columns[2].metric("Atualizado", datetime.now().strftime("%H:%M:%S"))
+
+if dataframe.empty:
+	st.info("Nenhum registro encontrado.")
+else:
+	st.subheader("Tabela de dados")
+	st.dataframe(dataframe, width="stretch", hide_index=True)
+	st.subheader("Visualização")
+	render_chart(dataframe)

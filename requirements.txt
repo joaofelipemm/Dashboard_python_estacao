@@ -1,5 +1,5 @@
 supabase
 python-dotenv
-dash
 pandas
-gunicorn
+streamlit
+plotly
