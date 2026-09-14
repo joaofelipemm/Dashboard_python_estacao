@@ -86,9 +86,7 @@ def prepare_weather_data(
 		prepared[humidity_column], errors="coerce"
 	)
 	prepared["_momento"] = pd.to_datetime(prepared[date_column], errors="coerce")
-	prepared = prepared.dropna(
-		subset=[temperature_column, humidity_column, "_momento"]
-	)
+	prepared = prepared.dropna(subset=[temperature_column, "_momento"])
 	prepared["_dia"] = prepared["_momento"].dt.date
 	prepared = prepared.sort_values("_momento")
 	return prepared, temperature_column, humidity_column, date_column
@@ -128,6 +126,8 @@ def render_selected_day(
 	days = sorted(dataframe["_dia"].unique())
 	selected_day = st.selectbox("Escolha o dia", days, format_func=str)
 	selected = dataframe[dataframe["_dia"] == selected_day]
+	temperature_samples = selected.dropna(subset=[temperature_column])
+	humidity_samples = selected.dropna(subset=[humidity_column])
 	start = pd.Timestamp(selected_day)
 	end = start + pd.Timedelta(hours=23, minutes=59, seconds=59)
 
@@ -140,8 +140,8 @@ def render_selected_day(
 	)
 	figure.add_trace(
 		go.Scatter(
-			x=selected["_momento"],
-			y=selected[temperature_column],
+			x=temperature_samples["_momento"],
+			y=temperature_samples[temperature_column],
 			mode="lines+markers",
 			name="Temperatura",
 			line={"color": "#e47b5c", "width": 2},
@@ -151,8 +151,8 @@ def render_selected_day(
 	)
 	figure.add_trace(
 		go.Scatter(
-			x=selected["_momento"],
-			y=selected[humidity_column],
+			x=humidity_samples["_momento"],
+			y=humidity_samples[humidity_column],
 			mode="lines+markers",
 			name="Umidade",
 			line={"color": "#2d7d82", "width": 2},
