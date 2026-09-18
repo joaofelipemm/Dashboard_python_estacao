@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import cast
 
 import pandas as pd
@@ -24,6 +25,9 @@ def get_setting(name: str, default: str | None = None) -> str | None:
 
 TABLE_NAME = get_setting("SUPABASE_TABLE", "leituras") or "leituras"
 ROW_LIMIT = int(get_setting("SUPABASE_ROW_LIMIT", "2000") or "2000")
+DATA_FILE = get_setting(
+	"DATA_FILE", r"G:\Meu Drive\Estacao_prototype\leituras.csv"
+)
 REFRESH_INTERVAL = "60s"
 
 
@@ -46,6 +50,9 @@ def query_table(client: Client, table: str, limit: int) -> list[dict]:
 
 
 def load_data() -> pd.DataFrame:
+	if DATA_FILE and Path(DATA_FILE).is_file():
+		return pd.read_csv(DATA_FILE, nrows=ROW_LIMIT)
+
 	rows = query_table(create_supabase_client(), TABLE_NAME, ROW_LIMIT)
 	return pd.DataFrame(rows)
 
@@ -89,12 +96,18 @@ def prepare_weather_data(
 	prepared[humidity_column] = pd.to_numeric(
 		prepared[humidity_column], errors="coerce"
 	)
-	prepared["_momento"] = pd.to_datetime(prepared[date_column], errors="coerce")
-	prepared["_dia"] = prepared["_momento"].dt.date
-	prepared["_hora_grafico"] = pd.to_datetime(
-		prepared["_dia"].astype(str) + " " + prepared[hour_column].astype(str),
+	prepared["_momento"] = pd.to_datetime(
+		prepared[date_column].astype(str)
+		+ " "
+		+ prepared[hour_column].astype(str),
+		dayfirst=True,
 		errors="coerce",
 	)
+	prepared["_dia"] = prepared["_momento"].dt.date
+	prepared["_hora_grafico"] = prepared["_momento"]
+	for column in ("chuva_acumulada", "taxa_chuva"):
+		if column in prepared:
+			prepared[column] = pd.to_numeric(prepared[column], errors="coerce")
 	prepared = prepared.dropna(
 		subset=[temperature_column, "_momento", "_hora_grafico"]
 	)
@@ -128,6 +141,20 @@ def render_daily_summary(
 	summary = temperature_summary.join(humidity_summary).reset_index()
 	summary["_dia"] = summary["_dia"].astype(str)
 	st.dataframe(summary, width="stretch", hide_index=True)
+
+
+def render_metrics(
+	dataframe: pd.DataFrame, temperature_column: str, humidity_column: str
+) -> None:
+	latest = dataframe.iloc[-1]
+	metrics = st.columns(4)
+	metrics[0].metric("Temperatura atual", f"{latest[temperature_column]:.1f} °C")
+	metrics[1].metric("Umidade atual", f"{latest[humidity_column]:.0f}%")
+	metrics[2].metric("Temperatura máxima", f"{dataframe[temperature_column].max():.1f} °C")
+	if "chuva_acumulada" in dataframe:
+		metrics[3].metric("Chuva acumulada", f"{dataframe['chuva_acumulada'].max():.1f} mm")
+	else:
+		metrics[3].metric("Leituras", f"{len(dataframe):,}".replace(",", "."))
 
 
 def render_selected_day(
@@ -166,6 +193,18 @@ def render_selected_day(
 		row=1,
 		col=1,
 	)
+	if "taxa_chuva" in selected:
+		figure.add_trace(
+			go.Bar(
+				x=selected["_hora_grafico"],
+				y=selected["taxa_chuva"],
+				name="Chuva",
+				marker_color="#5b8fb9",
+				opacity=0.45,
+			),
+			row=2,
+			col=1,
+		)
 	figure.add_trace(
 		go.Scatter(
 			x=humidity_samples["_hora_grafico"],
@@ -222,6 +261,7 @@ def render_dashboard() -> None:
 		return
 
 	st.subheader("Resumo diário")
+	render_metrics(prepared, temperature_column, humidity_column)
 	render_daily_summary(prepared, temperature_column, humidity_column)
 	st.subheader("Leituras por horário")
 	render_selected_day(prepared, temperature_column, humidity_column, hour_column)
@@ -230,7 +270,10 @@ def render_dashboard() -> None:
 def render_sidebar() -> None:
 	with st.sidebar:
 		st.header("Configuração")
-		st.write(f"Tabela: `{TABLE_NAME}`")
+		if DATA_FILE and Path(DATA_FILE).is_file():
+			st.write(f"Arquivo: `{Path(DATA_FILE).name}`")
+		else:
+			st.write(f"Tabela: `{TABLE_NAME}`")
 		st.write(f"Limite: `{ROW_LIMIT}` registros")
 		st.caption(f"Atualização automática: a cada {REFRESH_INTERVAL}")
 		if st.button("Atualizar agora", width="stretch"):
@@ -260,7 +303,10 @@ def configure_page() -> None:
 def main() -> None:
 	configure_page()
 	st.title("Leituras da estação")
-	st.caption("Dados atualizados diretamente da tabela no Supabase.")
+	if DATA_FILE and Path(DATA_FILE).is_file():
+		st.caption(f"Dados carregados de {Path(DATA_FILE).name}.")
+	else:
+		st.caption("Dados atualizados diretamente da tabela no Supabase.")
 	render_sidebar()
 	render_dashboard()
 
