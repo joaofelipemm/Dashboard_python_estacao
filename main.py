@@ -23,7 +23,7 @@ def get_setting(name: str, default: str | None = None) -> str | None:
 		return default
 
 
-TABLE_NAME = get_setting("SUPABASE_TABLE", "leitura") or "leitura"
+TABLE_NAME = get_setting("SUPABASE_TABLE", "leitura") or "leituras"
 ROW_LIMIT = int(get_setting("SUPABASE_ROW_LIMIT", "2000") or "2000")
 DATA_FILE = get_setting(
 	"DATA_FILE", r"G:\Meu Drive\Estacao_prototype\leituras.csv"
