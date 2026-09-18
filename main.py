@@ -45,7 +45,13 @@ def create_supabase_client() -> Client:
 
 
 def query_table(client: Client, table: str, limit: int) -> list[dict]:
-	response = client.table(table).select("*").limit(limit).execute()
+	response = (
+		client.table(table)
+		.select("*")
+		.order("created_at", desc=True)
+		.limit(limit)
+		.execute()
+	)
 	return cast(list[dict], response.data)
 
 
